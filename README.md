@@ -4,4 +4,4 @@
 
 ## 목록
 
-올린 코드는 아직 없다.
+- [small-example](packages/small-example/README.md): Python 함수 정의와 리스트 순회를 보여주는 짧은 예제

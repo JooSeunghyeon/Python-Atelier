@@ -10,5 +10,9 @@
   {
     "folder": "contextmanager-finally-on-exception",
     "summary": "contextlib.contextmanager에서 yield 앞뒤로 리소스를 획득하고 해제하며, 본문에서 예외가 나도 finally 구간이 실행되는지 확인한다."
+  },
+  {
+    "folder": "stable-sort-key-order",
+    "summary": "sorted()와 list.sort()에서 key 함수가 같은 값을 돌려줄 때 원래 삽입 순서가 유지되는지 여러 key 함수로 확인한다."
   }
 ]

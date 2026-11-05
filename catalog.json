@@ -14,5 +14,9 @@
   {
     "folder": "stable-sort-key-order",
     "summary": "sorted()와 list.sort()에서 key 함수가 같은 값을 돌려줄 때 원래 삽입 순서가 유지되는지 여러 key 함수로 확인한다."
+  },
+  {
+    "folder": "decorator-stacking-order",
+    "summary": "두 데코레이터를 겹쳤을 때 아래쪽이 먼저 감싸고 위쪽이 바깥에서 감싸는 적용 순서를 호출 로그로 확인한다."
   }
 ]

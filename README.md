@@ -8,3 +8,4 @@
 - [generator-skip-blank-lines](packages/generator-skip-blank-lines/README.md): 제너레이터 표현식으로 파일 줄을 지연 평가하면서 빈 줄과 주석 줄을 건너뛰는 흐름을 확인한다.
 - [contextmanager-finally-on-exception](packages/contextmanager-finally-on-exception/README.md): contextlib.contextmanager에서 yield 앞뒤로 리소스를 획득하고 해제하며, 본문에서 예외가 나도 finally 구간이 실행되는지 확인한다.
 - [stable-sort-key-order](packages/stable-sort-key-order/README.md): sorted()와 list.sort()에서 key 함수가 같은 값을 돌려줄 때 원래 삽입 순서가 유지되는지 여러 key 함수로 확인한다.
+- [decorator-stacking-order](packages/decorator-stacking-order/README.md): 두 데코레이터를 겹쳤을 때 아래쪽이 먼저 감싸고 위쪽이 바깥에서 감싸는 적용 순서를 호출 로그로 확인한다.

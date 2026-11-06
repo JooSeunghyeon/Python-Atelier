@@ -18,5 +18,9 @@
   {
     "folder": "decorator-stacking-order",
     "summary": "두 데코레이터를 겹쳤을 때 아래쪽이 먼저 감싸고 위쪽이 바깥에서 감싸는 적용 순서를 호출 로그로 확인한다."
+  },
+  {
+    "folder": "generator-close-finally",
+    "summary": "제너레이터를 close()로 명시 종료할 때 finally 블록이 실행되는지, GeneratorExit를 잡으면 어떻게 되는지 여러 상황별로 확인한다."
   }
 ]

@@ -22,5 +22,9 @@
   {
     "folder": "generator-close-finally",
     "summary": "제너레이터를 close()로 명시 종료할 때 finally 블록이 실행되는지, GeneratorExit를 잡으면 어떻게 되는지 여러 상황별로 확인한다."
+  },
+  {
+    "folder": "exitstack-partial-acquire-rollback",
+    "summary": "ExitStack으로 동적 개수의 리소스를 획득할 때 중간 실패 시 역순 롤백, pop_all() 소유권 이전, 정리 콜백 예외 체이닝을 확인한다."
   }
 ]

@@ -10,3 +10,4 @@
 - [stable-sort-key-order](packages/stable-sort-key-order/README.md): sorted()와 list.sort()에서 key 함수가 같은 값을 돌려줄 때 원래 삽입 순서가 유지되는지 여러 key 함수로 확인한다.
 - [decorator-stacking-order](packages/decorator-stacking-order/README.md): 두 데코레이터를 겹쳤을 때 아래쪽이 먼저 감싸고 위쪽이 바깥에서 감싸는 적용 순서를 호출 로그로 확인한다.
 - [generator-close-finally](packages/generator-close-finally/README.md): 제너레이터를 close()로 명시 종료할 때 finally 블록이 실행되는지, GeneratorExit를 잡으면 어떻게 되는지 여러 상황별로 확인한다.
+- [exitstack-partial-acquire-rollback](packages/exitstack-partial-acquire-rollback/README.md): ExitStack으로 동적 개수의 리소스를 획득할 때 중간 실패 시 역순 롤백, pop_all() 소유권 이전, 정리 콜백 예외 체이닝을 확인한다.

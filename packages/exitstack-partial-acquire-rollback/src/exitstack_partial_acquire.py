@@ -10,19 +10,16 @@ class FakeResource:
         self.name: str = name
         self.log: list[str] = log
         self.fail_on_enter: bool = fail_on_enter
-        self.entered: bool = False
     
     def __enter__(self):
         if self.fail_on_enter:
             self.log.append(f"{self.name}: 획득 실패")
             raise ValueError(f"{self.name} 획득 중 오류")
         self.log.append(f"{self.name}: 획득")
-        self.entered = True
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.log.append(f"{self.name}: 해제")
-        self.entered = False
         return False
 
 
@@ -31,6 +28,7 @@ def test_partial_failure_rollback():
     print("\n=== 부분 획득 실패 시 역순 롤백과 예외 전파 ===")
     
     log: list[str] = []
+    caught_exception = None
     
     try:
         with ExitStack() as stack:
@@ -39,7 +37,12 @@ def test_partial_failure_rollback():
             stack.enter_context(FakeResource("리소스3", log, fail_on_enter=True))
             stack.enter_context(FakeResource("리소스4", log))
     except ValueError as e:
+        caught_exception = e
         print(f"예외 포착: {e}")
+    
+    assert caught_exception is not None, "예외가 전파되지 않음"
+    assert isinstance(caught_exception, ValueError), f"예상과 다른 예외 타입: {type(caught_exception)}"
+    assert str(caught_exception) == "리소스3 획득 중 오류", f"예상과 다른 예외 메시지: {caught_exception}"
     
     print("로그 순서:")
     for entry in log:
@@ -117,12 +120,21 @@ def test_pop_all_ownership_transfer_failure():
     print("\n=== pop_all() 소유권 이전: 실패 시나리오 (올-오어-낫싱) ===")
     
     log: list[str] = []
+    caught_exception = None
+    stack_was_returned = False
     
     try:
         print("팩토리 함수 호출 중 (2번 인덱스에서 실패)...")
-        returned_stack = acquire_resources_atomically(["X", "Y", "Z", "W"], log, fail_at=2)
+        acquire_resources_atomically(["X", "Y", "Z", "W"], log, fail_at=2)
+        stack_was_returned = True
     except ValueError as e:
+        caught_exception = e
         print(f"예외 포착: {e}")
+    
+    assert caught_exception is not None, "예외가 전파되지 않음"
+    assert isinstance(caught_exception, ValueError), f"예상과 다른 예외 타입: {type(caught_exception)}"
+    assert str(caught_exception) == "Z 획득 중 오류", f"예상과 다른 예외 메시지: {caught_exception}"
+    assert not stack_was_returned, "실패했는데 스택이 반환됨"
     
     print("로그 (팩토리 실패 후):")
     for entry in log:
@@ -146,10 +158,11 @@ def failing_cleanup(name: str, log: list[str]):
 
 
 def test_cleanup_callback_raises():
-    """정리 콜백이 예외를 발생시키면 예외 체이닝이 일어나고 나머지 콜백도 계속 실행된다."""
-    print("\n=== 정리 콜백 예외 발생 시 예외 체이닝과 나머지 콜백 실행 ===")
+    """본문에서 예외가 발생하고 정리 콜백도 예외를 발생시키면 콜백 예외가 최종 예외가 되고 본문 예외는 __context__로 체이닝된다."""
+    print("\n=== 본문 예외 + 정리 콜백 예외 시 예외 체이닝과 나머지 콜백 실행 ===")
     
     log: list[str] = []
+    caught_exception = None
     
     try:
         with ExitStack() as stack:
@@ -157,21 +170,25 @@ def test_cleanup_callback_raises():
             stack.callback(failing_cleanup, "콜백A", log)
             stack.enter_context(FakeResource("리소스2", log))
             stack.callback(lambda: log.append("콜백B: 정상 정리"))
+            raise KeyError("본문 오류")
     except RuntimeError as e:
-        print(f"최종 예외: {e}")
-        if e.__context__:
-            print(f"체인된 원래 컨텍스트: {e.__context__}")
+        caught_exception = e
+        print(f"최종 예외 타입: {type(e).__name__}")
+        print(f"최종 예외 메시지: {e}")
+        print(f"__context__ 타입: {type(e.__context__).__name__ if e.__context__ else None}")
+        print(f"__context__ 메시지: {e.__context__ if e.__context__ else None}")
+    
+    assert caught_exception is not None, "예외가 전파되지 않음"
+    assert isinstance(caught_exception, RuntimeError), f"예상과 다른 최종 예외 타입: {type(caught_exception)}"
+    assert str(caught_exception) == "콜백A 정리 중 오류", f"예상과 다른 최종 예외 메시지: {caught_exception}"
+    
+    assert caught_exception.__context__ is not None, "__context__가 None임 (예외 체이닝 안 됨)"
+    assert isinstance(caught_exception.__context__, KeyError), f"예상과 다른 __context__ 타입: {type(caught_exception.__context__)}"
+    assert str(caught_exception.__context__) == "'본문 오류'", f"예상과 다른 __context__ 메시지: {caught_exception.__context__}"
     
     print("\n로그 순서:")
     for entry in log:
         print(f"  {entry}")
-    
-    assert "리소스1: 획득" in log
-    assert "리소스2: 획득" in log
-    assert "콜백B: 정상 정리" in log
-    assert "리소스2: 해제" in log
-    assert "콜백A: 정리 시작" in log
-    assert "리소스1: 해제" in log
     
     expected_order = [
         "리소스1: 획득",
@@ -183,7 +200,8 @@ def test_cleanup_callback_raises():
     ]
     assert log == expected_order, f"예상과 다른 로그 순서: {log}"
     
-    print("✓ 정리 콜백 예외 발생 시에도 나머지 콜백이 계속 실행되고 예외가 체이닝된다")
+    print("✓ 본문 예외 발생 후 정리 콜백 예외 시 콜백 예외가 최종 예외가 되고 본문 예외는 __context__로 체이닝된다")
+    print("✓ 나머지 모든 콜백과 리소스가 LIFO 순서로 정리된다")
 
 
 def test_zero_resources_boundary():

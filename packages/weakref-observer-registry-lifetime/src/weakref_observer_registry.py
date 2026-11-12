@@ -150,6 +150,17 @@ def demo_weak_registry_auto_cleanup():
     
     delivered = registry.publish("이벤트2")
     print(f"del 후 전달 개수: {delivered}, 로그: {log}")
+    
+    registry2 = WeakRegistry()
+    registry2.subscribe(len)
+    print(f"내장 함수 len subscribe 후 live_count: {registry2.live_count()}")
+    
+    try:
+        weakref.WeakMethod(len)
+        print("ERROR: weakref.WeakMethod(len)이 성공했다?")
+    except TypeError as e:
+        print(f"weakref.WeakMethod(len) TypeError: {e}")
+    
     print()
 
 

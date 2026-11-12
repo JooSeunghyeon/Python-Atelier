@@ -1,7 +1,6 @@
 """약한 참조 구독자 레지스트리의 객체 수명과 함정을 검증하는 테스트다."""
 
 import gc
-import types
 import unittest
 import weakref
 from pathlib import Path
@@ -19,12 +18,12 @@ from weakref_observer_registry import (
 
 
 # 테스트용 로그 전역 변수
-builtin_test_log: list[str] = []
+module_function_test_log: list[str] = []
 
 
-def builtin_callback(event: str) -> None:
-    """모듈 수준 함수로 내장 함수 테스트에 사용한다."""
-    builtin_test_log.append(f"builtin: {event}")
+def module_level_callback(event: str) -> None:
+    """모듈 수준 함수 테스트용 콜백."""
+    module_function_test_log.append(f"module: {event}")
 
 
 class TestStrongRegistry(unittest.TestCase):
@@ -71,7 +70,7 @@ class TestWeakRegistry(unittest.TestCase):
     def setUp(self):
         """테스트 전 잔여 객체 정리."""
         gc.collect()
-        builtin_test_log.clear()
+        module_function_test_log.clear()
     
     def test_auto_cleanup_when_subscriber_deleted(self):
         """구독자가 삭제되면 약한 참조가 끊어져 publish가 전달하지 않는다."""
@@ -139,15 +138,41 @@ class TestWeakRegistry(unittest.TestCase):
         self.assertIn("callable", str(cm.exception))
     
     def test_builtin_function_subscription(self):
-        """모듈 수준 함수를 subscribe할 수 있다 (len/list.append 같은 builtin_function_or_method는 __self__가 있어도 MethodType이 아니므로 weakref.ref 사용, 즉시 None됨)."""
+        """내장 함수(len)를 subscribe할 수 있다 (모듈 수준에서 항상 살아 있어 결정적)."""
         registry = WeakRegistry()
         
-        registry.subscribe(builtin_callback)
+        registry.subscribe(len)
+        self.assertEqual(registry.live_count(), 1)
+        
+        delivered = registry.publish("abc")
+        self.assertEqual(delivered, 1)
+    
+    def test_module_level_function_subscription(self):
+        """파이썬으로 정의한 모듈 수준 함수를 subscribe할 수 있다."""
+        registry = WeakRegistry()
+        
+        registry.subscribe(module_level_callback)
         self.assertEqual(registry.live_count(), 1)
         
         delivered = registry.publish("test_event")
         self.assertEqual(delivered, 1)
-        self.assertEqual(builtin_test_log, ["builtin: test_event"])
+        self.assertEqual(module_function_test_log, ["module: test_event"])
+    
+    def test_builtin_method_weakref_fails(self):
+        """내장 함수에 weakref.WeakMethod를 걸면 TypeError가 발생한다."""
+        with self.assertRaises(TypeError) as cm:
+            weakref.WeakMethod(len)
+        
+        self.assertIn("bound method", str(cm.exception))
+    
+    def test_builtin_object_method_immediately_dead(self):
+        """내장 객체의 메서드(list.append)는 MethodType이 아니라 weakref.ref로 저장되고 임시 객체라 등록 직후 live_count가 0이 된다 (CPython 참조 카운트 의존)."""
+        registry = WeakRegistry()
+        
+        some_list = []
+        registry.subscribe(some_list.append)
+        
+        self.assertEqual(registry.live_count(), 0)
     
     def test_temporary_bound_method_immediately_dead(self):
         """다른 참조 없이 생성된 임시 객체의 바운드 메서드는 등록 직후 live_count가 0이 된다 (CPython 참조 카운트 의존)."""

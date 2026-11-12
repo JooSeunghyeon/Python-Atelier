@@ -22,11 +22,12 @@ python3 -m unittest discover -s tests -v
 
 ### WeakRegistry (약한 참조)
 - 함수는 `weakref.ref`로 저장하고, 바운드 메서드는 `weakref.WeakMethod`로 저장한다
-- `isinstance(callback, types.MethodType)`로 바운드 메서드를 판별한다 (내장 함수는 `__self__`가 있어도 MethodType이 아니므로 `weakref.ref` 사용)
+- `isinstance(callback, types.MethodType)`로 바운드 메서드를 판별한다 (내장 함수 len은 `__self__`가 있어도 MethodType이 아니므로 `weakref.ref` 사용)
 - `publish()` 시 죽은 구독자는 자동으로 정리하고 실제 전달 개수를 반환한다
 - `live_count()` 메서드로 현재 살아 있는 구독자 수를 조회할 수 있다
 - 구독자 객체가 삭제되면 약한 참조가 자동으로 끊어져 다음 publish 시 전달되지 않는다
 - **함정 (CPython 참조 카운트 의존)**: 임시 객체의 바운드 메서드(`Subscriber("temp", log).on_event`)나 참조 없는 lambda(`lambda event: None`)를 subscribe하면 등록 직후 live_count가 0이 된다
+- **함정 (CPython 참조 카운트 의존)**: 내장 객체의 메서드(`some_list.append`)는 MethodType이 아니라 `weakref.ref`로 저장되고 임시 builtin 메서드 객체라 등록 직후 live_count가 0이 된다
 
 ### 바운드 메서드 함정
 - 바운드 메서드(`obj.method`)에 `weakref.ref`를 직접 걸면 임시 메서드 객체가 즉시 수거되어 약한 참조가 즉시 None이 된다

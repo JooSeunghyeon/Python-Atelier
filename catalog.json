@@ -26,5 +26,9 @@
   {
     "folder": "exitstack-partial-acquire-rollback",
     "summary": "ExitStack으로 동적 개수의 리소스를 획득할 때 중간 실패 시 역순 롤백, pop_all() 소유권 이전, 정리 콜백 예외 체이닝을 확인한다."
+  },
+  {
+    "folder": "weakref-observer-registry-lifetime",
+    "summary": "약한 참조(weakref)로 구독자 레지스트리를 만들 때 객체 수명, WeakMethod와 weakref.ref의 차이, finalize 함정(순환 참조·detach), 참조 순환과 gc.collect(), 약한 참조 불가 대상을 확인한다."
   }
 ]

@@ -11,3 +11,4 @@
 - [decorator-stacking-order](packages/decorator-stacking-order/README.md): 두 데코레이터를 겹쳤을 때 아래쪽이 먼저 감싸고 위쪽이 바깥에서 감싸는 적용 순서를 호출 로그로 확인한다.
 - [generator-close-finally](packages/generator-close-finally/README.md): 제너레이터를 close()로 명시 종료할 때 finally 블록이 실행되는지, GeneratorExit를 잡으면 어떻게 되는지 여러 상황별로 확인한다.
 - [exitstack-partial-acquire-rollback](packages/exitstack-partial-acquire-rollback/README.md): ExitStack으로 동적 개수의 리소스를 획득할 때 중간 실패 시 역순 롤백, pop_all() 소유권 이전, 정리 콜백 예외 체이닝을 확인한다.
+- [weakref-observer-registry-lifetime](packages/weakref-observer-registry-lifetime/README.md): 약한 참조(weakref)로 구독자 레지스트리를 만들 때 객체 수명, WeakMethod와 weakref.ref의 차이, finalize 함정(순환 참조·detach), 참조 순환과 gc.collect(), 약한 참조 불가 대상을 확인한다.

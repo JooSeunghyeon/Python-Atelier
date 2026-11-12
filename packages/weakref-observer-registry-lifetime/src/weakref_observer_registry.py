@@ -1,8 +1,9 @@
 """약한 참조로 구독자 레지스트리를 만들 때 객체 수명과 WeakMethod·finalize 함정을 확인한다."""
 
 import gc
+import types
 import weakref
-from typing import Callable, Any
+from typing import Callable
 
 
 class StrongRegistry:
@@ -47,7 +48,7 @@ class WeakRegistry:
         if not callable(callback):
             raise TypeError(f"callback must be callable, got {type(callback).__name__}")
         
-        if hasattr(callback, '__self__'):
+        if isinstance(callback, types.MethodType):
             weak_ref = weakref.WeakMethod(callback)
         else:
             weak_ref = weakref.ref(callback)
@@ -183,9 +184,13 @@ def demo_finalize_lifecycle():
         def __init__(self, name: str):
             self.name = name
     
+    def cleanup_with_return(msg: str) -> str:
+        log.append(msg)
+        return "정리완료"
+    
     target = Target("대상1")
     
-    finalizer = weakref.finalize(target, log.append, "finalize 실행됨")
+    finalizer = weakref.finalize(target, cleanup_with_return, "finalize 실행됨")
     
     print(f"finalize alive: {finalizer.alive}")
     
@@ -196,21 +201,31 @@ def demo_finalize_lifecycle():
     print(f"두 번째 직접 호출 결과: {result2}, alive: {finalizer.alive}, 로그: {log}")
     
     target2 = Target("대상2")
-    finalizer2 = weakref.finalize(target2, log.append, "finalize2 실행됨")
+    finalizer2 = weakref.finalize(target2, cleanup_with_return, "자동 실행 테스트")
+    weak2 = weakref.ref(target2)
     
-    print(f"finalize2 alive: {finalizer2.alive}")
-    
-    finalizer2.detach()
-    print(f"detach 후 alive: {finalizer2.alive}")
+    print(f"\nfinalize2 alive: {finalizer2.alive}, 약한 참조: {weak2() is not None}")
     
     del target2
-    print(f"del 후 로그 (detach했으므로 실행 안 됨): {log}")
+    print(f"del 후 finalize2 alive: {finalizer2.alive}, 약한 참조: {weak2() is not None}, 로그: {log}")
+    
+    target3 = Target("대상3")
+    finalizer3 = weakref.finalize(target3, cleanup_with_return, "detach 테스트")
+    weak3 = weakref.ref(target3)
+    
+    print(f"\nfinalize3 alive: {finalizer3.alive}")
+    
+    finalizer3.detach()
+    print(f"detach 후 alive: {finalizer3.alive}")
+    
+    del target3
+    print(f"del 후 약한 참조: {weak3() is not None}, 로그 (detach했으므로 실행 안 됨): {log}")
     print()
 
 
 def demo_finalize_reference_trap():
-    """finalize의 func/args가 대상을 참조하면 순환 참조로 수거되지 않는다."""
-    print("=== weakref.finalize 함정: 대상 참조 시 순환 참조 ===")
+    """finalize의 func/args가 대상을 참조하면 finalize 레지스트리가 강하게 붙잡아 수거되지 않는다."""
+    print("=== weakref.finalize 함정: 대상을 args로 전달 시 레지스트리가 강하게 붙잡음 ===")
     
     log: list[str] = []
     
@@ -219,10 +234,10 @@ def demo_finalize_reference_trap():
             self.name = name
     
     def cleanup_wrong(obj: Target):
-        """대상 객체를 직접 받으면 순환 참조가 생긴다."""
+        """대상 객체를 직접 받으면 finalize 레지스트리가 강하게 붙잡는다."""
         log.append(f"{obj.name} 정리")
     
-    target = Target("순환참조대상")
+    target = Target("붙잡힌대상")
     
     finalizer = weakref.finalize(target, cleanup_wrong, target)
     
@@ -231,13 +246,21 @@ def demo_finalize_reference_trap():
     
     del target
     
-    print(f"del 직후 약한 참조 (순환 참조로 살아 있음): {weak_ref() is not None}")
+    print(f"del 직후 약한 참조 (레지스트리가 붙잡아 살아 있음): {weak_ref() is not None}")
     
     gc.collect()
     
     print(f"gc.collect() 후 약한 참조 (여전히 살아 있음): {weak_ref() is not None}")
     print(f"로그: {log}")
-    print("주의: finalize가 대상을 참조하면 영원히 수거되지 않는다!")
+    
+    detached = finalizer.detach()
+    print(f"detach 실행: {detached is not None}")
+    
+    del detached
+    gc.collect()
+    
+    print(f"detach 결과 버린 후 gc.collect() 실행, 약한 참조: {weak_ref() is not None}")
+    print("원인: finalize 레지스트리가 args를 강하게 보관하여 대상이 붙잡혔고, detach로 해제 후에야 수거됨")
     print()
 
 
@@ -280,26 +303,34 @@ def demo_circular_reference_gc():
             self.name = name
             self.other: Node | None = None
     
-    node1 = Node("노드1")
-    node2 = Node("노드2")
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
     
-    node1.other = node2
-    node2.other = node1
+    try:
+        node1 = Node("노드1")
+        node2 = Node("노드2")
+        
+        node1.other = node2
+        node2.other = node1
+        
+        weak1 = weakref.ref(node1, lambda ref: log.append("node1 수거됨"))
+        weak2 = weakref.ref(node2, lambda ref: log.append("node2 수거됨"))
+        
+        print(f"순환 참조 생성 후 약한 참조: node1={weak1() is not None}, node2={weak2() is not None}")
+        
+        del node1, node2
+        
+        print(f"del 직후 약한 참조: node1={weak1() is not None}, node2={weak2() is not None}")
+        print(f"로그: {log}")
+        
+        gc.collect()
+        
+        print(f"gc.collect() 후 약한 참조: node1={weak1() is not None}, node2={weak2() is not None}")
+        print(f"로그: {log}")
+    finally:
+        if gc_was_enabled:
+            gc.enable()
     
-    weak1 = weakref.ref(node1, lambda ref: log.append("node1 수거됨"))
-    weak2 = weakref.ref(node2, lambda ref: log.append("node2 수거됨"))
-    
-    print(f"순환 참조 생성 후 약한 참조: node1={weak1() is not None}, node2={weak2() is not None}")
-    
-    del node1, node2
-    
-    print(f"del 직후 약한 참조: node1={weak1() is not None}, node2={weak2() is not None}")
-    print(f"로그: {log}")
-    
-    gc.collect()
-    
-    print(f"gc.collect() 후 약한 참조: node1={weak1() is not None}, node2={weak2() is not None}")
-    print(f"로그: {log}")
     print()
 
 

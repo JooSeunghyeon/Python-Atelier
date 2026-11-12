@@ -29,6 +29,6 @@
   },
   {
     "folder": "weakref-observer-registry-lifetime",
-    "summary": "약한 참조(weakref)로 구독자 레지스트리를 만들 때 객체 수명, WeakMethod와 weakref.ref의 차이, finalize 함정(순환 참조·detach), 참조 순환과 gc.collect(), 약한 참조 불가 대상을 확인한다."
+    "summary": "약한 참조(weakref)로 구독자 레지스트리를 만들 때 객체 수명, WeakMethod와 weakref.ref의 차이(MethodType 판별·내장 함수), finalize 함정(레지스트리가 args를 강하게 붙잡음·detach), 참조 순환과 gc.collect(), 약한 참조 불가 대상, 임시 객체 바운드 메서드·lambda 즉시 소멸 함정을 확인한다."
   }
 ]

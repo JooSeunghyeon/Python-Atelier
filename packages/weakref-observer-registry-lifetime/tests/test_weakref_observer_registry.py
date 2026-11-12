@@ -1,6 +1,7 @@
 """약한 참조 구독자 레지스트리의 객체 수명과 함정을 검증하는 테스트다."""
 
 import gc
+import types
 import unittest
 import weakref
 from pathlib import Path
@@ -15,6 +16,15 @@ from weakref_observer_registry import (
     Subscriber,
     SlottedWithoutWeakref,
 )
+
+
+# 테스트용 로그 전역 변수
+builtin_test_log: list[str] = []
+
+
+def builtin_callback(event: str) -> None:
+    """모듈 수준 함수로 내장 함수 테스트에 사용한다."""
+    builtin_test_log.append(f"builtin: {event}")
 
 
 class TestStrongRegistry(unittest.TestCase):
@@ -57,6 +67,11 @@ class TestStrongRegistry(unittest.TestCase):
 
 class TestWeakRegistry(unittest.TestCase):
     """약한 참조 레지스트리 테스트다."""
+    
+    def setUp(self):
+        """테스트 전 잔여 객체 정리."""
+        gc.collect()
+        builtin_test_log.clear()
     
     def test_auto_cleanup_when_subscriber_deleted(self):
         """구독자가 삭제되면 약한 참조가 끊어져 publish가 전달하지 않는다."""
@@ -122,6 +137,34 @@ class TestWeakRegistry(unittest.TestCase):
             registry.subscribe([1, 2, 3])
         
         self.assertIn("callable", str(cm.exception))
+    
+    def test_builtin_function_subscription(self):
+        """모듈 수준 함수를 subscribe할 수 있다 (len/list.append 같은 builtin_function_or_method는 __self__가 있어도 MethodType이 아니므로 weakref.ref 사용, 즉시 None됨)."""
+        registry = WeakRegistry()
+        
+        registry.subscribe(builtin_callback)
+        self.assertEqual(registry.live_count(), 1)
+        
+        delivered = registry.publish("test_event")
+        self.assertEqual(delivered, 1)
+        self.assertEqual(builtin_test_log, ["builtin: test_event"])
+    
+    def test_temporary_bound_method_immediately_dead(self):
+        """다른 참조 없이 생성된 임시 객체의 바운드 메서드는 등록 직후 live_count가 0이 된다 (CPython 참조 카운트 의존)."""
+        registry = WeakRegistry()
+        log: list[str] = []
+        
+        registry.subscribe(Subscriber("temp", log).on_event)
+        
+        self.assertEqual(registry.live_count(), 0)
+    
+    def test_lambda_without_reference_immediately_dead(self):
+        """다른 참조 없는 lambda를 subscribe하면 등록 직후 live_count가 0이 된다 (CPython 참조 카운트 의존)."""
+        registry = WeakRegistry()
+        
+        registry.subscribe(lambda event: None)
+        
+        self.assertEqual(registry.live_count(), 0)
 
 
 class TestBoundMethodWeakrefPitfall(unittest.TestCase):
@@ -159,20 +202,24 @@ class TestBoundMethodWeakrefPitfall(unittest.TestCase):
 class TestFinalizeLifecycle(unittest.TestCase):
     """weakref.finalize의 수명과 동작을 확인한다."""
     
-    def test_finalize_executes_once(self):
-        """finalize 콜백은 한 번만 실행된다."""
+    def test_finalize_executes_once_manual_call(self):
+        """finalize 콜백을 수동으로 호출하면 한 번만 실행되고 반환값을 돌려준다."""
         log: list[str] = []
         
         class Target:
             pass
         
+        def cleanup_with_return(msg: str) -> str:
+            log.append(msg)
+            return "cleanup_done"
+        
         target = Target()
-        finalizer = weakref.finalize(target, log.append, "executed")
+        finalizer = weakref.finalize(target, cleanup_with_return, "executed")
         
         self.assertTrue(finalizer.alive)
         
         result1 = finalizer()
-        self.assertIsNone(result1)
+        self.assertEqual(result1, "cleanup_done")
         self.assertFalse(finalizer.alive)
         self.assertEqual(log, ["executed"])
         
@@ -180,6 +227,31 @@ class TestFinalizeLifecycle(unittest.TestCase):
         self.assertIsNone(result2)
         self.assertFalse(finalizer.alive)
         self.assertEqual(log, ["executed"])
+        
+        del target
+        
+        self.assertEqual(log, ["executed"])
+    
+    def test_finalize_auto_execution_on_del(self):
+        """수동 호출 없이 del만으로 finalize가 자동 실행된다."""
+        log: list[str] = []
+        
+        class Target:
+            pass
+        
+        def cleanup_with_return(msg: str) -> str:
+            log.append(msg)
+            return "auto_cleanup"
+        
+        target = Target()
+        finalizer = weakref.finalize(target, cleanup_with_return, "auto_executed")
+        
+        self.assertTrue(finalizer.alive)
+        
+        del target
+        
+        self.assertFalse(finalizer.alive)
+        self.assertEqual(log, ["auto_executed"])
     
     def test_finalize_detach_prevents_execution(self):
         """detach 후에는 대상이 수거되어도 콜백이 실행되지 않는다."""
@@ -189,23 +261,26 @@ class TestFinalizeLifecycle(unittest.TestCase):
             pass
         
         target = Target()
+        weak_ref = weakref.ref(target)
         finalizer = weakref.finalize(target, log.append, "should not execute")
         
         self.assertTrue(finalizer.alive)
+        self.assertIsNotNone(weak_ref())
         
         finalizer.detach()
         self.assertFalse(finalizer.alive)
         
         del target
         
+        self.assertIsNone(weak_ref())
         self.assertEqual(log, [])
 
 
 class TestFinalizeReferenceTrap(unittest.TestCase):
-    """finalize가 대상을 참조하면 순환 참조로 수거되지 않는 함정을 확인한다."""
+    """finalize가 대상을 args로 받으면 레지스트리가 강하게 붙잡아 수거되지 않는 함정을 확인한다."""
     
-    def test_finalize_referencing_target_creates_cycle(self):
-        """finalize의 func/args가 대상을 참조하면 영원히 수거되지 않는다."""
+    def test_finalize_referencing_target_held_by_registry(self):
+        """finalize의 args가 대상을 참조하면 finalize 레지스트리가 강하게 붙잡아 수거되지 않는다."""
         log: list[str] = []
         
         class Target:
@@ -215,7 +290,7 @@ class TestFinalizeReferenceTrap(unittest.TestCase):
         def cleanup_wrong(obj: Target):
             log.append(f"{obj.name} cleaned")
         
-        target = Target("cycle")
+        target = Target("held")
         
         finalizer = weakref.finalize(target, cleanup_wrong, target)
         
@@ -229,6 +304,15 @@ class TestFinalizeReferenceTrap(unittest.TestCase):
         gc.collect()
         
         self.assertIsNotNone(weak_ref())
+        self.assertEqual(log, [])
+        
+        detached = finalizer.detach()
+        self.assertIsNotNone(detached)
+        
+        del detached
+        gc.collect()
+        
+        self.assertIsNone(weak_ref())
         self.assertEqual(log, [])
     
     def test_finalize_correct_usage(self):
@@ -258,6 +342,10 @@ class TestFinalizeReferenceTrap(unittest.TestCase):
 class TestCircularReferenceGC(unittest.TestCase):
     """참조 순환에 있는 객체는 gc.collect() 전까지 살아 있다."""
     
+    def setUp(self):
+        """테스트 전 잔여 객체 정리."""
+        gc.collect()
+    
     def test_circular_reference_survives_del(self):
         """참조 순환이 있으면 del 직후에는 수거되지 않는다."""
         log: list[str] = []
@@ -267,23 +355,30 @@ class TestCircularReferenceGC(unittest.TestCase):
                 self.name = name
                 self.other: Node | None = None
         
-        node1 = Node("node1")
-        node2 = Node("node2")
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
         
-        node1.other = node2
-        node2.other = node1
-        
-        weak1 = weakref.ref(node1, lambda ref: log.append("node1 collected"))
-        weak2 = weakref.ref(node2, lambda ref: log.append("node2 collected"))
-        
-        self.assertIsNotNone(weak1())
-        self.assertIsNotNone(weak2())
-        
-        del node1, node2
-        
-        self.assertIsNotNone(weak1())
-        self.assertIsNotNone(weak2())
-        self.assertEqual(log, [])
+        try:
+            node1 = Node("node1")
+            node2 = Node("node2")
+            
+            node1.other = node2
+            node2.other = node1
+            
+            weak1 = weakref.ref(node1, lambda ref: log.append("node1 collected"))
+            weak2 = weakref.ref(node2, lambda ref: log.append("node2 collected"))
+            
+            self.assertIsNotNone(weak1())
+            self.assertIsNotNone(weak2())
+            
+            del node1, node2
+            
+            self.assertIsNotNone(weak1())
+            self.assertIsNotNone(weak2())
+            self.assertEqual(log, [])
+        finally:
+            if gc_was_enabled:
+                gc.enable()
     
     def test_circular_reference_collected_after_gc(self):
         """gc.collect()를 호출하면 순환 참조가 해결되고 수거된다."""
@@ -294,23 +389,30 @@ class TestCircularReferenceGC(unittest.TestCase):
                 self.name = name
                 self.other: Node | None = None
         
-        node1 = Node("node1")
-        node2 = Node("node2")
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
         
-        node1.other = node2
-        node2.other = node1
-        
-        weak1 = weakref.ref(node1, lambda ref: log.append("node1 collected"))
-        weak2 = weakref.ref(node2, lambda ref: log.append("node2 collected"))
-        
-        del node1, node2
-        
-        gc.collect()
-        
-        self.assertIsNone(weak1())
-        self.assertIsNone(weak2())
-        self.assertIn("node1 collected", log)
-        self.assertIn("node2 collected", log)
+        try:
+            node1 = Node("node1")
+            node2 = Node("node2")
+            
+            node1.other = node2
+            node2.other = node1
+            
+            weak1 = weakref.ref(node1, lambda ref: log.append("node1 collected"))
+            weak2 = weakref.ref(node2, lambda ref: log.append("node2 collected"))
+            
+            del node1, node2
+            
+            gc.collect()
+            
+            self.assertIsNone(weak1())
+            self.assertIsNone(weak2())
+            self.assertIn("node1 collected", log)
+            self.assertIn("node2 collected", log)
+        finally:
+            if gc_was_enabled:
+                gc.enable()
 
 
 class TestWeakrefUnsupported(unittest.TestCase):

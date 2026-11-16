@@ -20,7 +20,6 @@ from pickle_state_migration import (
     ResourceWithLock,
     ResourceWithLockFixed,
     ObjectWithForbiddenGlobal,
-    RestrictedUnpickler,
     safe_loads,
     replace_class_in_module,
 )

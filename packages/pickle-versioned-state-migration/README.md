@@ -270,25 +270,21 @@ Ran 20 tests in 0.001s
 OK
 ```
 
-## 변이 검사 결과
+## 변이 검사 결과 (Python 3.12.3)
 
 ### 변이 (a): 모듈 속성 교체 제거
 
 `test_v1_to_v2_missing_attribute`에서 `original_class = replace_class_in_module(module_name, 'UserV1', UserV2)`를 `original_class = UserV1`로 변경했을 때:
 
 ```
-FAIL: test_v1_to_v2_missing_attribute (test_pickle_state_migration.TestV1ToV2AttributeError.test_v1_to_v2_missing_attribute)
 ----------------------------------------------------------------------
-Traceback (most recent call last):
-  File "tests/test_pickle_state_migration.py", line 46, in test_v1_to_v2_missing_attribute
-    self.assertIs(type(restored), UserV2)
-AssertionError: <class 'pickle_state_migration.UserV1'> is not <class 'pickle_state_migration.UserV2'>
-
-----------------------------------------------------------------------
-Ran 2 tests in 0.000s
+Ran 20 tests in 0.001s
 
 FAILED (failures=1)
 ```
+
+**실패한 테스트:**
+- `test_v1_to_v2_missing_attribute` - AssertionError: `<class 'pickle_state_migration.UserV1'> is not <class 'pickle_state_migration.UserV2'>`
 
 **결과:** 모듈 속성 교체 없이는 복원된 객체 타입이 UserV1 그대로이며 클래스 진화가 반영되지 않음
 
@@ -297,19 +293,24 @@ FAILED (failures=1)
 `UserVersioned.__setstate__`의 마이그레이션 로직을 `self.__dict__.update(state)`로 단순화했을 때:
 
 ```
-FAIL: test_future_version_via_pickle_loads ... AssertionError: ValueError not raised
-FAIL: test_future_version_via_setstate ... AssertionError: ValueError not raised
-FAIL: test_v1_legacy_to_versioned_migration ... AttributeError: 'UserVersioned' object has no attribute 'full_name'
-FAIL: test_v2_legacy_to_versioned_migration ... AttributeError: 'UserVersioned' object has no attribute 'full_name'
-ERROR: test_migration_logic_is_executed ... AttributeError: 'UserVersioned' object has no attribute 'full_name'
-ERROR: test_all_protocols_support_migration (protocol=0) ... AttributeError: 'UserVersioned' object has no attribute 'full_name'
-... (protocol 1~5 동일)
-
 ----------------------------------------------------------------------
-Ran 10 tests in 0.003s
+Ran 20 tests in 0.004s
 
-FAILED (failures=4, errors=4)
+FAILED (failures=3, errors=8)
 ```
+
+**실패한 테스트:**
+- `test_migration_logic_is_executed` - AssertionError: 'dummy' != 'Jane' (필드 변환 실패)
+- `test_future_version_via_pickle_loads` - AssertionError: ValueError not raised
+- `test_future_version_via_setstate` - AssertionError: ValueError not raised
+- `test_v1_legacy_to_versioned_migration` (ERROR) - AttributeError: 'UserVersioned' object has no attribute 'full_name'
+- `test_v2_legacy_to_versioned_migration` (ERROR) - AttributeError: 'UserVersioned' object has no attribute 'full_name'
+- `test_all_protocols_support_migration (protocol=0)` (ERROR) - AttributeError: 'UserVersioned' object has no attribute 'full_name'
+- `test_all_protocols_support_migration (protocol=1)` (ERROR) - AttributeError: 'UserVersioned' object has no attribute 'full_name'
+- `test_all_protocols_support_migration (protocol=2)` (ERROR) - AttributeError: 'UserVersioned' object has no attribute 'full_name'
+- `test_all_protocols_support_migration (protocol=3)` (ERROR) - AttributeError: 'UserVersioned' object has no attribute 'full_name'
+- `test_all_protocols_support_migration (protocol=4)` (ERROR) - AttributeError: 'UserVersioned' object has no attribute 'full_name'
+- `test_all_protocols_support_migration (protocol=5)` (ERROR) - AttributeError: 'UserVersioned' object has no attribute 'full_name'
 
 **결과:** 마이그레이션 로직 제거 시 버전별 필드 변환(name→full_name) 및 기본값 처리가 실패하고 미래 버전 검증도 동작하지 않음
 
@@ -318,18 +319,18 @@ FAILED (failures=4, errors=4)
 `RestrictedUnpickler.find_class`의 허용 목록 검사를 제거하고 `return super().find_class(module, name)`만 실행했을 때:
 
 ```
-FAIL: test_allowed_class_with_forbidden_attribute ... AssertionError: UnpicklingError not raised
-FAIL: test_builtin_function_rejected ... AssertionError: UnpicklingError not raised
-FAIL: test_different_module_same_class_name_rejected ... AssertionError: UnpicklingError not raised
-FAIL: test_disallowed_class_raises_unpickling_error ... AssertionError: UnpicklingError not raised
-FAIL: test_eval_function_rejected ... AssertionError: UnpicklingError not raised
-... (총 10개 실패)
-
 ----------------------------------------------------------------------
-Ran 12 tests in 0.001s
+Ran 20 tests in 0.001s
 
-FAILED (failures=10)
+FAILED (failures=5)
 ```
+
+**실패한 테스트:**
+- `test_allowed_class_with_forbidden_attribute` - AssertionError: UnpicklingError not raised
+- `test_builtin_function_rejected` - AssertionError: UnpicklingError not raised
+- `test_different_module_same_class_name_rejected` - AssertionError: UnpicklingError not raised
+- `test_disallowed_class_raises_unpickling_error` - AssertionError: UnpicklingError not raised
+- `test_eval_function_rejected` - AssertionError: UnpicklingError not raised
 
 **결과:** find_class 제한 제거 시 허용되지 않은 전역 객체(builtins.eval, 다른 모듈 클래스, 속성의 위험 함수)가 모두 통과
 
@@ -338,19 +339,17 @@ FAILED (failures=10)
 `__setstate__`에서 `self.lock = threading.Lock()` 라인을 제거했을 때:
 
 ```
-ERROR: test_lock_with_getstate_picklable (test_pickle_state_migration.TestUnpicklableLock.test_lock_with_getstate_picklable)
 ----------------------------------------------------------------------
-Traceback (most recent call last):
-  File "tests/test_pickle_state_migration.py", line 170, in test_lock_with_getstate_picklable
-    self.assertIsNot(restored.lock, resource.lock)
-                     ^^^^^^^^^^^^^
-AttributeError: 'ResourceWithLockFixed' object has no attribute 'lock'
+Ran 20 tests in 0.001s
 
-----------------------------------------------------------------------
-Ran 2 tests in 0.001s
-
-FAILED (errors=2)
+FAILED (errors=4)
 ```
+
+**실패한 테스트:**
+- `test_copy_creates_new_lock` (ERROR) - AttributeError: 'ResourceWithLockFixed' object has no attribute 'lock'
+- `test_deepcopy_creates_new_lock` (ERROR) - AttributeError: 'ResourceWithLockFixed' object has no attribute 'lock'
+- `test_lock_is_new_object_after_restore` (ERROR) - AttributeError: 'ResourceWithLockFixed' object has no attribute 'lock'
+- `test_lock_with_getstate_picklable` (ERROR) - AttributeError: 'ResourceWithLockFixed' object has no attribute 'lock'
 
 **결과:** Lock 재생성 제거 시 복원된 객체에 lock 속성이 없어 AttributeError 발생
 

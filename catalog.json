@@ -30,5 +30,9 @@
   {
     "folder": "weakref-observer-registry-lifetime",
     "summary": "약한 참조(weakref)로 구독자 레지스트리를 만들 때 객체 수명, WeakMethod와 weakref.ref의 차이(MethodType 판별·내장 함수), finalize 함정(레지스트리가 args를 강하게 붙잡음·detach), 참조 순환과 gc.collect(), 약한 참조 불가 대상, 임시 객체 바운드 메서드·lambda 즉시 소멸 함정을 확인한다."
+  },
+  {
+    "folder": "pickle-versioned-state-migration",
+    "summary": "pickle 복원 시 __init__ 생략·버전 상태 마이그레이션·find_class 제한을 확인한다. pickle.loads는 __init__을 호출하지 않아 배포 사이에 클래스 정의가 변경되면 새 필드가 없고, 레거시 클래스에서 진화된 클래스로 __getstate__/__setstate__를 통한 상태 버전 관리와 마이그레이션을 처리하며, threading.Lock은 제외 후 재생성(원본 잡혀 있어도 복원본 풀림)하고, RestrictedUnpickler로 find_class를 허용 목록으로 제한한다(허용된 클래스라도 속성에 허용되지 않은 전역 섞이면 거부)."
   }
 ]

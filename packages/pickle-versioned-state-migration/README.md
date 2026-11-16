@@ -6,15 +6,16 @@ pickle로 객체를 직렬화하고 복원할 때 발생하는 여러 함정과 
 
 ### 1. V1→V2 복원 시 __init__ 생략 함정
 
-`pickle.loads()`는 객체를 복원할 때 `__init__`을 호출하지 않는다. 클래스 정의가 변경되어 새 필드가 추가된 경우, V1으로 저장된 객체를 모듈의 클래스를 V2로 교체한 후 복원하면 새 필드가 없어 `AttributeError`가 발생한다.
+`pickle.loads()`는 객체를 복원할 때 `__init__`을 호출하지 않는다. 실제 운영에서는 배포 사이에 같은 모듈/클래스 이름의 정의가 바뀌는데, 이 예제에서는 그 상황을 한 프로세스 안에서 재현하기 위해 `replace_class_in_module` 헬퍼로 모듈 속성을 교체한다. 클래스 정의가 변경되어 새 필드가 추가된 경우, V1으로 저장된 객체를 V2 클래스로 복원하면 새 필드(`email`)가 없어 `AttributeError`가 발생한다.
 
+**코드 예시 (타입 힌트 생략, 실제 소스는 타입 힌트 포함):**
 ```python
 class UserV1:
-    def __init__(self, name: str):
+    def __init__(self, name):
         self.name = name
 
 class UserV2:
-    def __init__(self, name: str, email: str = ""):
+    def __init__(self, name, email=""):
         self.name = name
         self.email = email
 
@@ -22,7 +23,8 @@ class UserV2:
 user_v1 = UserV1("Alice")
 pickled = pickle.dumps(user_v1)
 
-# 모듈의 UserV1을 UserV2로 교체
+# 실제 운영에서는 배포 사이에 클래스 정의 변경
+# 테스트/데모에서는 모듈 속성 교체로 재현
 replace_class_in_module(__name__, 'UserV1', UserV2)
 
 # 복원 시 __init__ 호출 안 됨 → email 없음
@@ -34,17 +36,17 @@ print(restored.email)  # AttributeError!
 
 레거시 클래스에서 진화된 클래스로 전환할 때, `__getstate__`와 `__setstate__`를 사용하여 상태 버전을 관리하고 복원 시 마이그레이션을 수행한다.
 
-**레거시 V1 (버전 키 없음):**
+**레거시 V1 (버전 키 없음, 타입 힌트 생략):**
 ```python
 class UserV1Legacy:
-    def __init__(self, name: str):
+    def __init__(self, name):
         self.name = name
 ```
 
-**레거시 V2 (버전 키 포함):**
+**레거시 V2 (버전 키 포함, 타입 힌트 생략):**
 ```python
 class UserV2Legacy:
-    def __init__(self, name: str, email: str = ""):
+    def __init__(self, name, email=""):
         self.name = name
         self.email = email
         self._state_version = 2
@@ -55,12 +57,17 @@ class UserV2Legacy:
             'name': self.name,
             'email': self.email
         }
+    
+    def __setstate__(self, state):
+        self._state_version = state['_state_version']
+        self.name = state['name']
+        self.email = state['email']
 ```
 
-**진화된 최신 클래스 (항상 버전 3):**
+**진화된 최신 클래스 (항상 버전 3, 타입 힌트 생략):**
 ```python
 class UserVersioned:
-    def __init__(self, full_name: str, email: str = ""):
+    def __init__(self, full_name, email=""):
         self.full_name = full_name
         self.email = email
         self._state_version = 3
@@ -91,7 +98,7 @@ class UserVersioned:
             raise ValueError(f"알 수 없는 상태 버전: {version}")
 ```
 
-레거시 V1으로 pickle한 바이트를 모듈의 V1 클래스를 UserVersioned로 교체한 후 복원하면, 버전 키가 없으므로 기본값 1로 처리되어 마이그레이션된다.
+실제 운영에서는 배포 사이에 레거시 클래스 정의가 진화된 클래스로 바뀐다. 레거시 V1으로 pickle한 바이트를 모듈의 V1 클래스를 UserVersioned로 교체한 후 복원하면, 버전 키가 없으므로 기본값 1로 처리되어 마이그레이션된다.
 
 ### 3. pickle 불가 속성 처리
 
@@ -99,9 +106,10 @@ class UserVersioned:
 
 `__getstate__`에서 pickle 불가 속성을 제외하고, `__setstate__`에서 새로 생성하여 처리한다. 복원된 객체의 Lock은 원본과 다른 새 객체이며, 원본이 잡혀 있어도 복원본은 풀려 있다.
 
+**타입 힌트 생략 코드 예시:**
 ```python
 class ResourceWithLockFixed:
-    def __init__(self, name: str):
+    def __init__(self, name):
         self.name = name
         self.lock = threading.Lock()
     
@@ -119,6 +127,7 @@ class ResourceWithLockFixed:
 
 허용되지 않은 전역 객체(예: `builtins.eval`, `os.system` 등)를 참조하는 pickle 데이터는 `pickle.UnpicklingError`로 거부된다. 허용된 클래스라도 속성값에 허용되지 않은 전역이 섞여 있으면 거부된다.
 
+**타입 힌트 생략 코드 예시:**
 ```python
 class RestrictedUnpickler(pickle.Unpickler):
     def __init__(self, file, allowed_globals):
@@ -265,43 +274,85 @@ OK
 
 ### 변이 (a): 모듈 속성 교체 제거
 
-`test_v1_to_v2_missing_attribute`에서 `replace_class_in_module` 호출을 주석 처리했을 때:
+`test_v1_to_v2_missing_attribute`에서 `original_class = replace_class_in_module(module_name, 'UserV1', UserV2)`를 `original_class = UserV1`로 변경했을 때:
 
 ```
-ERROR: 테스트 실패 (모듈 로드 오류)
+FAIL: test_v1_to_v2_missing_attribute (test_pickle_state_migration.TestV1ToV2AttributeError.test_v1_to_v2_missing_attribute)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "tests/test_pickle_state_migration.py", line 46, in test_v1_to_v2_missing_attribute
+    self.assertIs(type(restored), UserV2)
+AssertionError: <class 'pickle_state_migration.UserV1'> is not <class 'pickle_state_migration.UserV2'>
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+FAILED (failures=1)
 ```
 
-**결과:** 모듈 속성 교체 없이는 클래스 진화가 pickle에 반영되지 않음을 입증
+**결과:** 모듈 속성 교체 없이는 복원된 객체 타입이 UserV1 그대로이며 클래스 진화가 반영되지 않음
 
 ### 변이 (b): __setstate__ 마이그레이션 로직 제거
 
 `UserVersioned.__setstate__`의 마이그레이션 로직을 `self.__dict__.update(state)`로 단순화했을 때:
 
 ```
-3개 FAIL/ERROR
+FAIL: test_future_version_via_pickle_loads ... AssertionError: ValueError not raised
+FAIL: test_future_version_via_setstate ... AssertionError: ValueError not raised
+FAIL: test_v1_legacy_to_versioned_migration ... AttributeError: 'UserVersioned' object has no attribute 'full_name'
+FAIL: test_v2_legacy_to_versioned_migration ... AttributeError: 'UserVersioned' object has no attribute 'full_name'
+ERROR: test_migration_logic_is_executed ... AttributeError: 'UserVersioned' object has no attribute 'full_name'
+ERROR: test_all_protocols_support_migration (protocol=0) ... AttributeError: 'UserVersioned' object has no attribute 'full_name'
+... (protocol 1~5 동일)
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.003s
+
+FAILED (failures=4, errors=4)
 ```
 
-**결과:** 마이그레이션 로직이 제거되면 버전별 상태 처리가 실패
+**결과:** 마이그레이션 로직 제거 시 버전별 필드 변환(name→full_name) 및 기본값 처리가 실패하고 미래 버전 검증도 동작하지 않음
 
 ### 변이 (c): find_class 허용 목록 검사 우회
 
-`RestrictedUnpickler.find_class`의 허용 목록 검사를 제거하고 직접 `super().find_class()`를 호출했을 때:
+`RestrictedUnpickler.find_class`의 허용 목록 검사를 제거하고 `return super().find_class(module, name)`만 실행했을 때:
 
 ```
-3개 FAIL/ERROR
+FAIL: test_allowed_class_with_forbidden_attribute ... AssertionError: UnpicklingError not raised
+FAIL: test_builtin_function_rejected ... AssertionError: UnpicklingError not raised
+FAIL: test_different_module_same_class_name_rejected ... AssertionError: UnpicklingError not raised
+FAIL: test_disallowed_class_raises_unpickling_error ... AssertionError: UnpicklingError not raised
+FAIL: test_eval_function_rejected ... AssertionError: UnpicklingError not raised
+... (총 10개 실패)
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.001s
+
+FAILED (failures=10)
 ```
 
-**결과:** find_class 제한이 없으면 허용되지 않은 전역 객체가 통과
+**결과:** find_class 제한 제거 시 허용되지 않은 전역 객체(builtins.eval, 다른 모듈 클래스, 속성의 위험 함수)가 모두 통과
 
 ### 변이 (d): ResourceWithLockFixed.__setstate__에서 Lock 재생성 제거
 
 `__setstate__`에서 `self.lock = threading.Lock()` 라인을 제거했을 때:
 
 ```
-1개 ERROR
+ERROR: test_lock_with_getstate_picklable (test_pickle_state_migration.TestUnpicklableLock.test_lock_with_getstate_picklable)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "tests/test_pickle_state_migration.py", line 170, in test_lock_with_getstate_picklable
+    self.assertIsNot(restored.lock, resource.lock)
+                     ^^^^^^^^^^^^^
+AttributeError: 'ResourceWithLockFixed' object has no attribute 'lock'
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.001s
+
+FAILED (errors=2)
 ```
 
-**결과:** Lock 재생성이 없으면 복원 시 lock 속성이 없어 실패
+**결과:** Lock 재생성 제거 시 복원된 객체에 lock 속성이 없어 AttributeError 발생
 
 ### 결론
 
@@ -309,7 +360,7 @@ ERROR: 테스트 실패 (모듈 로드 오류)
 
 ## 핵심 함정 정리
 
-1. **pickle.loads는 __init__을 호출하지 않는다**: 클래스 정의가 변경되면 새 필드가 없어 AttributeError가 발생한다. 모듈 속성을 교체하여 클래스 진화를 pickle에 반영해야 한다.
+1. **pickle.loads는 __init__을 호출하지 않는다**: 실제 운영에서는 배포 사이에 같은 모듈/클래스 이름의 정의가 바뀌는데, V1으로 저장된 객체를 V2 정의로 복원하면 새 필드가 없어 AttributeError가 발생한다. (`replace_class_in_module`은 테스트/데모에서 그 상황을 한 프로세스 안에서 재현하기 위한 장치다.)
 
 2. **상태 버전 관리가 필수다**: 레거시 클래스와 진화된 클래스를 분리하고, `__getstate__`/`__setstate__`로 버전별 마이그레이션을 처리해야 한다. 버전 키가 없는 옛 상태는 기본값 1로 처리한다.
 

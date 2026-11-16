@@ -4,6 +4,7 @@ import pickle
 import io
 import threading
 import copy
+import sys
 from typing import Any
 
 
@@ -12,6 +13,8 @@ class UserV1:
     
     def __init__(self, name: str):
         self.name: str = name
+        self.init_call_count: int = getattr(self.__class__, '_init_call_count', 0) + 1
+        self.__class__._init_call_count = self.init_call_count
 
 
 class UserV2:
@@ -24,45 +27,56 @@ class UserV2:
     def __init__(self, name: str, email: str = ""):
         self.name: str = name
         self.email: str = email
+        self.init_call_count: int = getattr(self.__class__, '_init_call_count', 0) + 1
+        self.__class__._init_call_count = self.init_call_count
+
+
+class UserV1Legacy:
+    """레거시 V1: __getstate__/__setstate__ 없이 name만 있다."""
+    
+    def __init__(self, name: str):
+        self.name: str = name
+
+
+class UserV2Legacy:
+    """레거시 V2: __getstate__/__setstate__로 버전 키를 포함한다."""
+    
+    def __init__(self, name: str, email: str = ""):
+        self.name: str = name
+        self.email: str = email
+        self._state_version: int = 2
+    
+    def __getstate__(self) -> dict[str, Any]:
+        return {
+            '_state_version': 2,
+            'name': self.name,
+            'email': self.email
+        }
+    
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self._state_version = state['_state_version']
+        self.name = state['name']
+        self.email = state['email']
 
 
 class UserVersioned:
-    """상태 버전 관리를 지원하는 사용자 클래스.
+    """진화된 사용자 클래스: 항상 최신 버전(3) 상태를 사용하고 옛 버전을 마이그레이션한다."""
     
-    V1→V2: email 필드 추가
-    V2→V3: name → full_name 필드 이름 변경
-    """
-    
-    def __init__(self, name: str = "", email: str = "", full_name: str = "", version: int = 3):
-        if version < 3 and name:
-            self.full_name: str = name
-        else:
-            self.full_name: str = full_name
+    def __init__(self, full_name: str, email: str = ""):
+        self.full_name: str = full_name
         self.email: str = email
-        self._state_version: int = version
+        self._state_version: int = 3
     
     def __getstate__(self) -> dict[str, Any]:
-        """상태를 직렬화할 때 버전 정보를 포함한다."""
-        if self._state_version == 1:
-            return {
-                '_state_version': 1,
-                'name': self.full_name
-            }
-        elif self._state_version == 2:
-            return {
-                '_state_version': 2,
-                'name': self.full_name,
-                'email': self.email
-            }
-        else:
-            return {
-                '_state_version': 3,
-                'full_name': self.full_name,
-                'email': self.email
-            }
+        """항상 버전 3 형식으로 직렬화한다."""
+        return {
+            '_state_version': 3,
+            'full_name': self.full_name,
+            'email': self.email
+        }
     
     def __setstate__(self, state: dict[str, Any]) -> None:
-        """상태를 복원할 때 버전에 따라 마이그레이션한다."""
+        """옛 버전 상태를 최신 버전으로 마이그레이션한다."""
         version = state.get('_state_version', 1)
         
         if version == 1:
@@ -79,6 +93,20 @@ class UserVersioned:
             self.email = state['email']
         else:
             raise ValueError(f"알 수 없는 상태 버전: {version}")
+
+
+class UserFutureVersion:
+    """미래 버전 테스트용: 버전 99를 쓴다."""
+    
+    def __init__(self, data: str):
+        self.data: str = data
+        self._state_version: int = 99
+    
+    def __getstate__(self) -> dict[str, Any]:
+        return {
+            '_state_version': 99,
+            'data': self.data
+        }
 
 
 class ResourceWithLock:
@@ -122,6 +150,14 @@ class ResourceWithLockFixed:
         self.lock.release()
 
 
+class ObjectWithForbiddenGlobal:
+    """허용되지 않은 전역 함수를 참조하는 객체."""
+    
+    def __init__(self, name: str, func):
+        self.name: str = name
+        self.func = func
+
+
 class RestrictedUnpickler(pickle.Unpickler):
     """허용 목록으로 제한된 find_class를 제공하는 Unpickler다.
     
@@ -146,57 +182,74 @@ def safe_loads(data: bytes, allowed_globals: set[tuple[str, str]]) -> Any:
     return RestrictedUnpickler(io.BytesIO(data), allowed_globals).load()
 
 
+def replace_class_in_module(module_name: str, class_name: str, new_class):
+    """모듈의 클래스를 다른 클래스로 교체한다."""
+    module = sys.modules[module_name]
+    original = getattr(module, class_name)
+    setattr(module, class_name, new_class)
+    return original
+
+
 def demo_v1_to_v2_attribute_error():
     """V1으로 저장된 객체를 V2 클래스로 복원하면 AttributeError가 발생한다."""
     print("=== V1→V2 복원 시 AttributeError 함정 ===")
-    
-    global UserV1
     
     user_v1 = UserV1("Alice")
     pickled = pickle.dumps(user_v1)
     print(f"V1으로 pickle: name={user_v1.name}")
     
-    original_v1 = UserV1
-    UserV1 = UserV2
+    original_class = replace_class_in_module(__name__, 'UserV1', UserV2)
     
     try:
+        UserV2._init_call_count = 0
         restored = pickle.loads(pickled)
-        print(f"복원 성공: name={restored.name}")
+        print(f"복원 성공: type={type(restored).__name__}, name={restored.name}")
+        print(f"__init__ 호출 횟수: {UserV2._init_call_count}")
         print(f"email 접근 시도...")
         _ = restored.email
         print("ERROR: email이 존재한다?")
     except AttributeError as e:
         print(f"AttributeError 발생: {e}")
     finally:
-        UserV1 = original_v1
+        replace_class_in_module(__name__, 'UserV1', original_class)
     
     print()
 
 
-def demo_versioned_migration_v1_to_v2():
-    """상태 버전 관리로 V1→V2 마이그레이션을 처리한다."""
-    print("=== 상태 버전 관리: V1→V2 마이그레이션 ===")
+def demo_v1_legacy_to_versioned():
+    """레거시 V1(버전 키 없음)을 최신 클래스로 복원하면 기본 버전 1로 마이그레이션된다."""
+    print("=== 레거시 V1 → 최신 버전 마이그레이션 ===")
     
-    user_v1 = UserVersioned(name="Bob", version=1)
+    user_v1 = UserV1Legacy("Bob")
     pickled = pickle.dumps(user_v1)
-    print(f"V1으로 pickle: name={user_v1.full_name}, version={user_v1._state_version}")
+    print(f"레거시 V1으로 pickle: name={user_v1.name}")
     
-    restored = pickle.loads(pickled)
-    print(f"복원 성공: full_name={restored.full_name}, email={restored.email}, version={restored._state_version}")
+    original_class = replace_class_in_module(__name__, 'UserV1Legacy', UserVersioned)
+    
+    try:
+        restored = pickle.loads(pickled)
+        print(f"복원 성공: full_name={restored.full_name}, email={restored.email}, version={restored._state_version}")
+    finally:
+        replace_class_in_module(__name__, 'UserV1Legacy', original_class)
     
     print()
 
 
-def demo_versioned_migration_v1_to_v3():
-    """상태 버전 관리로 V1→V3 필드 이름 변경 마이그레이션을 처리한다."""
-    print("=== 상태 버전 관리: V1→V3 필드 이름 변경 ===")
+def demo_v2_legacy_to_versioned():
+    """레거시 V2를 최신 클래스로 복원하면 버전 2로 마이그레이션된다."""
+    print("=== 레거시 V2 → 최신 버전 마이그레이션 ===")
     
-    user_v1 = UserVersioned(name="Charlie", version=1)
-    pickled = pickle.dumps(user_v1)
-    print(f"V1으로 pickle: name={user_v1.full_name}, version={user_v1._state_version}")
+    user_v2 = UserV2Legacy("Charlie", "charlie@example.com")
+    pickled = pickle.dumps(user_v2)
+    print(f"레거시 V2로 pickle: name={user_v2.name}, email={user_v2.email}, version={user_v2._state_version}")
     
-    restored = pickle.loads(pickled)
-    print(f"복원 성공: full_name={restored.full_name}, email={restored.email}, version={restored._state_version}")
+    original_class = replace_class_in_module(__name__, 'UserV2Legacy', UserVersioned)
+    
+    try:
+        restored = pickle.loads(pickled)
+        print(f"복원 성공: full_name={restored.full_name}, email={restored.email}, version={restored._state_version}")
+    finally:
+        replace_class_in_module(__name__, 'UserV2Legacy', original_class)
     
     print()
 
@@ -205,18 +258,19 @@ def demo_future_version_error():
     """미래 버전 상태를 복원하면 ValueError가 발생한다."""
     print("=== 미래 버전 상태 복원 시 ValueError ===")
     
-    state = {
-        '_state_version': 99,
-        'unknown_field': 'value'
-    }
+    future = UserFutureVersion("test_data")
+    pickled = pickle.dumps(future)
+    print(f"미래 버전(99)으로 pickle: data={future.data}")
     
-    user = UserVersioned(full_name="dummy", email="dummy@example.com")
+    original_class = replace_class_in_module(__name__, 'UserFutureVersion', UserVersioned)
     
     try:
-        user.__setstate__(state)
-        print("ERROR: 미래 버전을 복원했다?")
+        restored = pickle.loads(pickled)
+        print(f"ERROR: 미래 버전을 복원했다? full_name={restored.full_name}")
     except ValueError as e:
         print(f"ValueError 발생: {e}")
+    finally:
+        replace_class_in_module(__name__, 'UserFutureVersion', original_class)
     
     print()
 
@@ -241,23 +295,21 @@ def demo_lock_fixed_with_getstate():
     print("=== __getstate__/__setstate__로 Lock 처리 ===")
     
     resource = ResourceWithLockFixed("res2")
-    original_lock_id = id(resource.lock)
     
     acquired = resource.acquire()
-    print(f"원본 락 획득: {acquired}, 락 id: {original_lock_id}")
-    resource.release()
+    print(f"원본 락 획득: {acquired}")
     
     pickled = pickle.dumps(resource)
-    print(f"pickle 성공: name={resource.name}")
+    print(f"원본 락 잡은 상태에서 pickle 성공: name={resource.name}")
     
     restored = pickle.loads(pickled)
-    restored_lock_id = id(restored.lock)
-    print(f"복원 성공: name={restored.name}, 복원된 락 id: {restored_lock_id}")
+    print(f"복원 성공: name={restored.name}")
+    print(f"복원된 락 is 원본 락: {restored.lock is resource.lock}")
     
-    print(f"락이 다른 객체인가: {original_lock_id != restored_lock_id}")
+    acquired_restored = restored.acquire()
+    print(f"복원된 락 획득 (원본이 잡혀 있어도 복원본은 풀림): {acquired_restored}")
     
-    acquired = restored.acquire()
-    print(f"복원된 락 획득: {acquired}")
+    resource.release()
     restored.release()
     
     print()
@@ -267,7 +319,7 @@ def demo_restricted_unpickler_allowed():
     """허용 목록에 있는 클래스는 safe_loads로 복원할 수 있다."""
     print("=== RestrictedUnpickler: 허용된 클래스 ===")
     
-    user = UserVersioned(full_name="David", email="david@example.com")
+    user = UserVersioned("David", "david@example.com")
     pickled = pickle.dumps(user)
     
     allowed = {
@@ -287,7 +339,7 @@ def demo_restricted_unpickler_rejected():
     """허용 목록에 없는 전역 객체를 참조하는 데이터는 거부된다."""
     print("=== RestrictedUnpickler: 허용되지 않은 전역 객체 거부 ===")
     
-    user = UserVersioned(full_name="Eve", email="eve@example.com")
+    user = UserVersioned("Eve", "eve@example.com")
     pickled = pickle.dumps(user)
     
     allowed = {
@@ -320,20 +372,50 @@ def demo_restricted_unpickler_builtin_rejected():
     print()
 
 
+def demo_restricted_unpickler_mixed_object():
+    """허용된 클래스라도 속성에 허용되지 않은 전역이 있으면 거부된다."""
+    print("=== RestrictedUnpickler: 허용된 클래스 + 허용되지 않은 속성 거부 ===")
+    
+    obj = ObjectWithForbiddenGlobal("test", eval)
+    pickled = pickle.dumps(obj)
+    
+    allowed = {
+        (__name__, 'ObjectWithForbiddenGlobal'),
+    }
+    
+    try:
+        restored = safe_loads(pickled, allowed)
+        print(f"ERROR: 복원이 성공했다? name={restored.name}")
+    except pickle.UnpicklingError as e:
+        print(f"UnpicklingError 발생: {e}")
+    
+    print()
+
+
 def demo_copy_uses_getstate():
     """copy.deepcopy와 copy.copy도 __getstate__/__setstate__를 거친다."""
     print("=== copy.deepcopy/copy.copy도 __getstate__/__setstate__를 사용 ===")
     
     resource = ResourceWithLockFixed("res3")
-    original_lock_id = id(resource.lock)
+    
+    acquired = resource.acquire()
+    print(f"원본 락 획득: {acquired}")
     
     deep_copied = copy.deepcopy(resource)
-    deep_lock_id = id(deep_copied.lock)
-    print(f"deepcopy: name={deep_copied.name}, 락 id={deep_lock_id}, 원본과 다른가={original_lock_id != deep_lock_id}")
+    print(f"deepcopy: name={deep_copied.name}, 복원된 락 is 원본 락: {deep_copied.lock is resource.lock}")
+    
+    acquired_deep = deep_copied.acquire()
+    print(f"deepcopy된 락 획득 (원본이 잡혀 있어도 복사본은 풀림): {acquired_deep}")
     
     shallow_copied = copy.copy(resource)
-    shallow_lock_id = id(shallow_copied.lock)
-    print(f"copy: name={shallow_copied.name}, 락 id={shallow_lock_id}, 원본과 다른가={original_lock_id != shallow_lock_id}")
+    print(f"copy: name={shallow_copied.name}, 복원된 락 is 원본 락: {shallow_copied.lock is resource.lock}")
+    
+    acquired_shallow = shallow_copied.acquire()
+    print(f"copy된 락 획득: {acquired_shallow}")
+    
+    resource.release()
+    deep_copied.release()
+    shallow_copied.release()
     
     print()
 
@@ -342,12 +424,17 @@ def demo_protocol_versions():
     """모든 pickle 프로토콜 버전에서 상태 마이그레이션이 동작한다."""
     print("=== 모든 pickle 프로토콜에서 상태 마이그레이션 ===")
     
-    user_v1 = UserVersioned(name="Frank", version=1)
-    
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        user_v1 = UserV1Legacy("Frank")
         pickled = pickle.dumps(user_v1, protocol=protocol)
-        restored = pickle.loads(pickled)
-        print(f"프로토콜 {protocol}: full_name={restored.full_name}, email={restored.email}, version={restored._state_version}")
+        
+        original_class = replace_class_in_module(__name__, 'UserV1Legacy', UserVersioned)
+        
+        try:
+            restored = pickle.loads(pickled)
+            print(f"프로토콜 {protocol}: full_name={restored.full_name}, email={restored.email}, version={restored._state_version}")
+        finally:
+            replace_class_in_module(__name__, 'UserV1Legacy', original_class)
     
     print()
 
@@ -356,7 +443,7 @@ def demo_already_latest_version():
     """이미 최신 버전인 상태를 재복원해도 정상 작동한다."""
     print("=== 이미 최신 버전인 상태 재복원 ===")
     
-    user_v3 = UserVersioned(full_name="Grace", email="grace@example.com")
+    user_v3 = UserVersioned("Grace", "grace@example.com")
     pickled = pickle.dumps(user_v3)
     print(f"V3로 pickle: full_name={user_v3.full_name}, email={user_v3.email}, version={user_v3._state_version}")
     
@@ -368,14 +455,15 @@ def demo_already_latest_version():
 
 if __name__ == "__main__":
     demo_v1_to_v2_attribute_error()
-    demo_versioned_migration_v1_to_v2()
-    demo_versioned_migration_v1_to_v3()
+    demo_v1_legacy_to_versioned()
+    demo_v2_legacy_to_versioned()
     demo_future_version_error()
     demo_unpicklable_lock_error()
     demo_lock_fixed_with_getstate()
     demo_restricted_unpickler_allowed()
     demo_restricted_unpickler_rejected()
     demo_restricted_unpickler_builtin_rejected()
+    demo_restricted_unpickler_mixed_object()
     demo_copy_uses_getstate()
     demo_protocol_versions()
     demo_already_latest_version()

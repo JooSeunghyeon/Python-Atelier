@@ -34,5 +34,9 @@
   {
     "folder": "pickle-versioned-state-migration",
     "summary": "pickle 복원 시 __init__ 생략·버전 상태 마이그레이션·find_class 제한을 확인한다. pickle.loads는 __init__을 호출하지 않아 배포 사이에 클래스 정의가 변경되면 새 필드가 없고, 레거시 클래스에서 진화된 클래스로 __getstate__/__setstate__를 통한 상태 버전 관리와 마이그레이션을 처리하며, threading.Lock은 제외 후 재생성(원본 잡혀 있어도 복원본 풀림)하고, RestrictedUnpickler로 find_class를 허용 목록으로 제한한다(허용된 클래스라도 속성에 허용되지 않은 전역 섞이면 거부)."
+  },
+  {
+    "folder": "slots-inheritance-dict-memory-design",
+    "summary": "__slots__ 상속에서 __slots__를 빠뜨린 서브클래스에 __dict__·__weakref__가 되살아나 오타 속성이 조용히 저장되는 지점을 확인한다. 빈 __slots__·새 필드만 선언·dataclass(slots=True)·__init_subclass__ 검사(StrictSlots) 설계를 비교하고, __dictoffset__ 기반 검사와 원인 클래스 탐지(중간 계층 누수, tuple·BaseException 경계), 클래스 변수 충돌·lay-out conflict, 개당 바이트 상대 비교(3.12~3.14)를 다룬다."
   }
 ]

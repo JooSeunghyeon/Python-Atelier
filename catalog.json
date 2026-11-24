@@ -38,5 +38,9 @@
   {
     "folder": "slots-inheritance-dict-memory-design",
     "summary": "__slots__ 상속에서 __slots__를 빠뜨린 서브클래스에 __dict__·__weakref__가 되살아나 오타 속성이 조용히 저장되는 지점을 확인한다. 빈 __slots__·새 필드만 선언·dataclass(slots=True)·__init_subclass__ 검사(StrictSlots) 설계를 비교하고, __dictoffset__ 기반 검사와 원인 클래스 탐지(중간 계층 누수, tuple·BaseException 경계), 클래스 변수 충돌·lay-out conflict, 개당 바이트 상대 비교(3.12~3.14)를 다룬다."
+  },
+  {
+    "folder": "struct-binary-layout-padding-byteorder-design",
+    "summary": "struct 모듈로 바이너리 레코드를 만들 때 네이티브 형식(@, 접두사 없음)이 C 정렬 규칙에 따라 패딩을 몰래 넣어 레코드 크기와 바이트 배치가 바뀌는 지점을 테스트로 고정하고, 명시 바이트 순서 형식(<, >, =, !)으로 고정 레이아웃을 쓰는 설계, 검증 헤더 설계(magic·version·payload_length 불일치 거절), 미리 컴파일한 struct.Struct 사용을 비교한다. 범위 밖 값·버퍼 길이 불일치·float 오버플로·s 형식 오류, 조용한 변형 경계(바이트 순서 혼동 1→16777216, ? 형식에 문자열, s 잘림/NUL 채움, f 정밀도 손실), 레코드 배열 나머지 바이트 거절, 패딩 계산을 다룬다."
   }
 ]

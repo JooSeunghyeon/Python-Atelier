@@ -166,53 +166,46 @@ class TestSignatureDrift(unittest.TestCase):
 
     def test_signature_drift_mock_passes(self) -> None:
         """기본 Mock은 시그니처가 바뀌어도 테스트를 통과시킨다."""
-        # 시나리오: 정의 함수에 새 키워드 인자가 추가되었지만,
+        # 시나리오: 정의 함수에 필수 인자(region)가 추가되었지만,
         # 사용 코드는 낡은 규약으로 부른다.
         # 기본 Mock 패치는 이런 불일치를 통과시킨다.
         
-        # 새 시그니처를 가진 함수
-        def new_fetch_rate(currency: str, *, timeout: float = 1.0, retries: int = 3) -> float:
-            return 1.0
-
-        # 원본 함수를 임시로 교체
-        original_fetch = rate_source.fetch_rate
-        rate_source.fetch_rate = new_fetch_rate
-        
-        try:
-            # 기본 Mock 패치: 낡은 호출 방식도 통과
-            with mock.patch.object(invoice_qualified, "rate_source") as mock_module:
-                mock_module.fetch_rate = mock.MagicMock(return_value=2.0)
-                # 호출 코드가 낡은 규약(retries 없이)으로 부르지만 오류 없음
-                result = invoice_qualified.convert(10.0, "USD")
-                self.assertEqual(result, 20.0)
-        finally:
-            rate_source.fetch_rate = original_fetch
-
-    def test_signature_drift_autospec_fails(self) -> None:
-        """autospec은 시그니처가 바뀌면 TypeError를 낸다."""
-        # 시나리오: 정의 함수에 필수 인자가 추가되었지만,
-        # 사용 코드는 낡은 규약으로 부른다.
-        # autospec 패치는 이런 불일치를 TypeError로 드러낸다.
-        
-        # 필수 인자가 추가된 새 시그니처를 가진 함수
+        # 필수 인자가 추가된 새 시그니처
         def new_fetch_rate(currency: str, region: str, *, timeout: float = 1.0) -> float:
             return 1.0
 
-        # 원본 함수를 임시로 교체
-        original_fetch = rate_source.fetch_rate
-        rate_source.fetch_rate = new_fetch_rate
-        invoice_from_import.fetch_rate = new_fetch_rate
+        # 정의 모듈의 함수를 새 시그니처로 임시 교체
+        with mock.patch.object(rate_source, "fetch_rate", new=new_fetch_rate):
+            # 사용 위치에 기본 Mock 패치
+            with mock.patch.object(invoice_from_import, "fetch_rate") as mock_fetch:
+                mock_fetch.return_value = 2.0
+                # 호출 코드가 낡은 규약(region 없이)으로 부르지만 기본 Mock은 통과시킴
+                result = invoice_from_import.convert(10.0, "USD")
+                self.assertEqual(result, 20.0)
         
-        try:
-            # autospec 패치: 필수 인자가 부족하면 TypeError
-            with mock.patch.object(invoice_from_import, "fetch_rate", autospec=True):
-                with self.assertRaises(TypeError) as cm:
-                    # 호출 코드가 낡은 규약(region 없이)으로 부르면 TypeError
+        # 복원 확인
+        self.assertEqual(rate_source.fetch_rate("USD"), 1.0)
+
+    def test_signature_drift_autospec_fails(self) -> None:
+        """autospec은 시그니처가 바뀌면 TypeError를 낸다."""
+        # 시나리오: 정의 함수에 필수 인자(region)가 추가되었지만,
+        # 사용 코드는 낡은 규약으로 부른다.
+        # autospec 패치는 이런 불일치를 TypeError로 드러낸다.
+        
+        # 필수 인자가 추가된 새 시그니처
+        def new_fetch_rate(currency: str, region: str, *, timeout: float = 1.0) -> float:
+            return 1.0
+
+        # 정의 모듈의 함수를 새 시그니처로 임시 교체
+        with mock.patch.object(rate_source, "fetch_rate", new=new_fetch_rate):
+            # 사용 위치에 autospec 패치 (새 시그니처를 따름)
+            with mock.patch.object(invoice_from_import, "fetch_rate", autospec=new_fetch_rate):
+                with self.assertRaises(TypeError):
+                    # 호출 코드가 낡은 규약(region 없이)으로 부르면 autospec은 TypeError
                     invoice_from_import.convert(10.0, "USD")
-                # 메시지는 버전마다 다를 수 있으므로 TypeError만 확인
-        finally:
-            rate_source.fetch_rate = original_fetch
-            invoice_from_import.fetch_rate = original_fetch
+        
+        # 복원 확인
+        self.assertEqual(rate_source.fetch_rate("USD"), 1.0)
 
 
 class TestPatchRestoration(unittest.TestCase):
@@ -258,9 +251,12 @@ class TestDecoratorArgumentOrder(unittest.TestCase):
         @mock.patch("rate_source.fetch_rate", return_value=2.0)
         @mock.patch("invoice_from_import.fetch_rate", return_value=3.0)
         def test_func(mock_invoice: mock.MagicMock, mock_rate: mock.MagicMock) -> None:
-            # 아래 데코레이터(rate_source)가 첫 인자, 위 데코레이터(invoice_from_import)가 둘째 인자
-            self.assertEqual(mock_rate.return_value, 2.0)
+            # 아래 데코레이터(invoice_from_import)가 첫 인자, 위 데코레이터(rate_source)가 둘째 인자
             self.assertEqual(mock_invoice.return_value, 3.0)
+            self.assertEqual(mock_rate.return_value, 2.0)
+            # 각 mock이 올바른 대상을 패치했는지 확인
+            self.assertIs(mock_invoice, invoice_from_import.fetch_rate)
+            self.assertIs(mock_rate, rate_source.fetch_rate)
 
         test_func()
 
@@ -268,17 +264,21 @@ class TestDecoratorArgumentOrder(unittest.TestCase):
 class TestMockCallAssertions(unittest.TestCase):
     """Mock 호출 단언을 고정한다."""
 
-    def test_assert_called_once_with_timeout(self) -> None:
-        """timeout 인자 전달을 assert_called_once_with로 확인한다."""
+    def test_convert_calls_fetch_rate_with_currency_only(self) -> None:
+        """convert는 timeout을 넘기지 않고 currency만 넘긴다."""
         with mock.patch("rate_source.fetch_rate", return_value=1.0) as mock_fetch:
             invoice_qualified.convert(10.0, "USD")
             mock_fetch.assert_called_once_with("USD")
 
-    def test_assert_called_with_explicit_timeout(self) -> None:
-        """명시 timeout 인자를 확인한다."""
-        with mock.patch("rate_source.fetch_rate", return_value=1.0) as mock_fetch:
-            rate_source.fetch_rate("EUR", timeout=5.0)
-            mock_fetch.assert_called_once_with("EUR", timeout=5.0)
+    def test_timeout_is_keyword_only(self) -> None:
+        """autospec으로 timeout이 키워드 전용 인자임을 확인한다."""
+        with mock.patch("rate_source.fetch_rate", autospec=True) as mock_fetch:
+            mock_fetch.return_value = 1.0
+            # 위치 인자로 timeout을 전달하면 TypeError
+            with self.assertRaises(TypeError):
+                mock_fetch("USD", 5.0)
+            # 키워드 인자로는 가능
+            mock_fetch("USD", timeout=5.0)
 
 
 class TestBoundaryConditions(unittest.TestCase):
@@ -326,8 +326,8 @@ class TestProbeScenarios(unittest.TestCase):
     def test_probe_signature_drift(self) -> None:
         """probe_signature_drift가 예상 결과를 돌려준다."""
         result = probe_signature_drift()
-        self.assertEqual(result["mock_wrong_args"], "pass")
-        self.assertEqual(result["autospec_wrong_args"], "TypeError")
+        self.assertEqual(result["mock_signature_drift"], "pass")
+        self.assertEqual(result["autospec_signature_drift"], "TypeError")
 
     def test_probe_attribute_access(self) -> None:
         """probe_attribute_access가 예상 결과를 돌려준다."""

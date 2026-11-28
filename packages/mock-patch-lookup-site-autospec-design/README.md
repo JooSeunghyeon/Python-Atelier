@@ -46,12 +46,12 @@ CPython 3.12.3에서 테스트 39개가 모두 통과했다.
 
 ### 2. 시그니처 드리프트 탐지
 
-| Mock 종류 | 잘못된 인자 조합 | 결과 |
+| Mock 종류 | 시나리오 | 결과 |
 |---|---|---|
-| 기본 Mock | `fetch_rate("USD", "extra", 1, 2, bogus=1)` | pass (통과) |
-| autospec | `fetch_rate("USD", "extra")` | TypeError |
+| 기본 Mock | 정의 함수에 필수 인자(region) 추가, 호출 코드는 낡은 규약 | pass (통과) |
+| autospec | 정의 함수에 필수 인자(region) 추가, 호출 코드는 낡은 규약 | TypeError |
 
-- 기본 `Mock`/`MagicMock`은 어떤 인자 조합도 받아들인다. 정의 함수에 새 필수 인자가 추가되어도 테스트는 계속 통과한다.
+- 기본 `Mock`/`MagicMock`은 시그니처가 바뀌어도 테스트를 통과시킨다. 정의 함수에 새 필수 인자(`region`)가 추가되어도 호출 코드가 낡은 규약(`currency`만)으로 부르는 테스트는 계속 통과한다.
 - `autospec=True`는 시그니처를 강제해 `TypeError`를 낸다. 호출 규약이 바뀌면 테스트가 실패해 드리프트를 드러낸다.
 
 ### 3. 속성 접근 차이
@@ -139,16 +139,16 @@ def convert(amount, currency, *, fetch_rate=None):
 @mock.patch("rate_source.fetch_rate", return_value=2.0)
 @mock.patch("invoice_from_import.fetch_rate", return_value=3.0)
 def test_func(mock_invoice, mock_rate):
-    # 아래 데코레이터(rate_source)가 첫 인자, 위 데코레이터(invoice_from_import)가 둘째 인자
+    # 아래 데코레이터(invoice_from_import)가 첫 인자, 위 데코레이터(rate_source)가 둘째 인자
 ```
 
 - 여러 `@mock.patch` 데코레이터를 쌓으면 아래 데코레이터부터 순서대로 인자가 들어온다.
 
 ### 경계 조건
 
-- **amount:** 0이면 결과도 0, 음수면 결과도 음수, `bool(True)`는 1.0, `bool(False)`는 0.0
+- **amount:** 입력 검증 없이 float 곱셈 결과를 그대로 돌려준다. 0이면 결과도 0, 음수면 결과도 음수. `bool`은 `int`의 하위 클래스이므로 `True`는 1.0, `False`는 0.0으로 계산된다.
 - **알 수 없는 통화:** `UnknownCurrency`(ValueError의 하위 클래스) 전파
-- **timeout 인자:** `assert_called_once_with("USD")` 또는 `assert_called_once_with("EUR", timeout=5.0)`로 확인
+- **timeout 인자:** `convert`는 `timeout`을 넘기지 않고 `currency`만 넘긴다. `fetch_rate`의 `timeout`은 키워드 전용 인자다.
 
 ## 정리
 
@@ -158,4 +158,4 @@ def test_func(mock_invoice, mock_rate):
 4. **create=True는 오타를 숨긴다.** 존재하지 않는 속성을 조용히 통과시킨다. 오타를 드러내려면 `create=True` 없이 패치한다.
 5. **주입 설계에서 기본값 함정을 피한다.** 기본값 `fetch_rate=rate_source.fetch_rate`는 정의 시점에 묶여 패치가 안 먹는다. `fetch_rate=None`으로 두고 호출 시점에 조회하거나, 패치 없이 테스트용 함수를 직접 주입한다.
 6. **패치는 항상 복원된다.** `with` 블록을 벗어나거나 예외가 나도 원래 함수로 복원된다. 중첩 패치는 역순으로 복원된다.
-7. **데코레이터는 아래부터 순서대로 인자가 들어온다.** 여러 `@mock.patch`를 쌓으면 아래 데코레이터가 첫 인자, 위 데코레이터가 둘째 인자다.
+7. **데코레이터는 아래부터 순서대로 인자가 들어온다.** 여러 `@mock.patch`를 쌓으면 아래 데코레이터(적용 순서는 먼저)가 첫 인자, 위 데코레이터(적용 순서는 나중)가 둘째 인자다.

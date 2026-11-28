@@ -55,25 +55,31 @@ def probe_signature_drift() -> dict[str, str]:
     """
     result: dict[str, str] = {}
 
-    # 기본 Mock: 잘못된 인자 조합을 통과시킴
-    with mock.patch("invoice_from_import.fetch_rate") as mock_fetch:
-        try:
-            invoice_from_import.convert(10.0, "USD")
-            # 기본 Mock은 어떤 인자로든 호출 가능
-            mock_fetch("USD", "extra", 1, 2, bogus=1)
-            result["mock_wrong_args"] = "pass"
-        except Exception as e:
-            result["mock_wrong_args"] = type(e).__name__
+    # 필수 인자가 추가된 새 시그니처
+    def new_fetch_rate(currency: str, region: str, *, timeout: float = 1.0) -> float:
+        return 1.0
 
-    # autospec: 잘못된 인자 조합을 TypeError로 거절
-    with mock.patch("invoice_from_import.fetch_rate", autospec=True):
-        try:
-            invoice_from_import.convert(10.0, "USD")
-            # autospec Mock은 시그니처를 강제
-            invoice_from_import.fetch_rate("USD", "extra")
-            result["autospec_wrong_args"] = "pass"
-        except Exception as e:
-            result["autospec_wrong_args"] = type(e).__name__
+    # 시나리오: 정의 함수에 필수 인자(region)가 추가되었지만,
+    # 사용 코드는 낡은 규약(currency만)으로 부른다.
+
+    # 기본 Mock: 시그니처가 바뀌어도 통과시킴
+    with mock.patch.object(rate_source, "fetch_rate", new=new_fetch_rate):
+        with mock.patch.object(invoice_from_import, "fetch_rate") as mock_fetch:
+            mock_fetch.return_value = 2.0
+            try:
+                invoice_from_import.convert(10.0, "USD")
+                result["mock_signature_drift"] = "pass"
+            except Exception as e:
+                result["mock_signature_drift"] = type(e).__name__
+
+    # autospec: 시그니처가 바뀌면 TypeError
+    with mock.patch.object(rate_source, "fetch_rate", new=new_fetch_rate):
+        with mock.patch.object(invoice_from_import, "fetch_rate", autospec=new_fetch_rate):
+            try:
+                invoice_from_import.convert(10.0, "USD")
+                result["autospec_signature_drift"] = "pass"
+            except Exception as e:
+                result["autospec_signature_drift"] = type(e).__name__
 
     return result
 

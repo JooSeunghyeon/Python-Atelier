@@ -42,5 +42,9 @@
   {
     "folder": "struct-binary-layout-padding-byteorder-design",
     "summary": "struct 모듈로 바이너리 레코드를 만들 때 네이티브 형식(@, 접두사 없음)이 C 정렬 규칙에 따라 패딩을 몰래 넣어 레코드 크기와 바이트 배치가 바뀌는 지점을 테스트로 고정하고, 명시 바이트 순서 형식(<, >, =, !)으로 고정 레이아웃을 쓰는 설계, 검증 헤더 설계(magic·version·payload_length 불일치 거절), 미리 컴파일한 struct.Struct 사용을 비교한다. 범위 밖 값·버퍼 길이 불일치·float 오버플로·s 형식 오류, 조용한 변형 경계(바이트 순서 혼동 1→16777216, ? 형식에 문자열, s 잘림/NUL 채움, f 정밀도 손실), 레코드 배열 나머지 바이트 거절, 패딩 계산을 다룬다."
+  },
+  {
+    "folder": "mock-patch-lookup-site-autospec-design",
+    "summary": "unittest.mock.patch가 정의 모듈이 아니라 사용 위치(lookup site)를 바꿔야 하는 지점과 autospec=True가 시그니처 변경을 드러내는 설계를 비교한다. from-import 방식은 사용 위치 패치가 필요하고 모듈 속성 접근은 정의 모듈 패치가 필요하며, 잘못된 위치를 패치하면 조용히 실패한다. 기본 Mock은 잘못된 인자·존재하지 않는 속성을 통과시키지만 autospec은 TypeError·AttributeError로 거절하고, 주입 설계의 기본값 함정(정의 시점 묶임)과 권장 설계(None 기본값 + 호출 시점 조회), create=True 오타 숨김, spec vs autospec 차이, 복원·데코레이터 순서·경계를 다룬다."
   }
 ]
